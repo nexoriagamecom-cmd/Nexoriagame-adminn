@@ -34,6 +34,7 @@ export default function ProduitsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [uploading, setUploading] = useState(false) // ← Nouvel état
 
   async function load() {
     const supabase = createClient()
@@ -68,6 +69,36 @@ export default function ProduitsPage() {
     const { name, value, type } = e.target
     const checked = (e.target as HTMLInputElement).checked
     setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
+  }
+
+  // ✅ Fonction d'upload d'image
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    const supabase = createClient()
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`
+
+    const { data, error } = await supabase.storage
+      .from('produits-images')
+      .upload(`public/${fileName}`, file)
+
+    if (data) {
+      const { data: publicUrlData } = supabase.storage
+        .from('produits-images')
+        .getPublicUrl(`public/${fileName}`)
+      const newUrl = publicUrlData.publicUrl
+      const currentImages = form.images
+      const updatedImages = currentImages ? `${currentImages}\n${newUrl}` : newUrl
+      setForm(prev => ({ ...prev, images: updatedImages }))
+    } else {
+      setError(error?.message || "Erreur lors de l'upload")
+    }
+    setUploading(false)
+    // Réinitialiser l'input file
+    e.target.value = ''
   }
 
   const handleSave = async (e: React.FormEvent) => {
@@ -235,6 +266,18 @@ export default function ProduitsPage() {
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>URLs images (une par ligne)</label>
                 <textarea name="images" value={form.images} onChange={handleChange} placeholder="https://example.com/image.jpg" rows={3} style={{ width: '100%', padding: '11px 14px', fontSize: 13, resize: 'vertical', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
+                
+                {/* ✅ Upload depuis le PC */}
+                <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageUpload}
+                    disabled={uploading}
+                    style={{ fontSize: 13, color: 'var(--gray)' }}
+                  />
+                  {uploading && <span style={{ fontSize: 12, color: '#06b6d4' }}>Upload en cours…</span>}
+                </div>
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Variations JSON (optionnel)</label>
