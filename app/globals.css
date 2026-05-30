@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #08080f;
+  --bg2: #0e0e1a;
+  --bg3: #13131f;
+  --violet: #7c3aed;
+  --violet-light: #a855f7;
+  --cyan: #06b6d4;
+  --white: #f8fafc;
+  --gray: #94a3b8;
+  --gray-dark: #334155;
+  --border: rgba(124,58,237,0.25);
+  --font-title: 'Orbitron', monospace;
+  --font-body: 'Rajdhani', sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+body { font-family: var(--font-body); background: var(--bg); color: var(--white); overflow-x: hidden; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--violet); border-radius: 3px; }
+
+input, textarea, select {
+  background: var(--bg2) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--white) !important;
+  font-family: var(--font-body) !important;
+  border-radius: 10px !important;
+  outline: none !important;
+  transition: border-color .2s, box-shadow .2s !important;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--violet) !important;
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.15) !important;
+}
+input::placeholder, textarea::placeholder { color: #334155 !important; }
+select option { background: var(--bg2); }
