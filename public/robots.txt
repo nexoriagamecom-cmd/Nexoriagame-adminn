@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /paiement
+
+Sitemap: https://nexoriagame.com/sitemap.xml
