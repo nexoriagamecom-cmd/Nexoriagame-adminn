@@ -12,88 +12,91 @@ const SOGE_HMAC_KEY = process.env.SOGECOMMERCE_HMAC_KEY!
 export async function POST(request: NextRequest) {
   try {
     const body = await request.text()
-    console.log('🔔 IPN reçue (brute) :', body)
+    console.log('🔔 IPN brute :', body)
 
-    // Parser l'URL-encoded
     const params = new URLSearchParams(body)
-    const krAnswerRaw = params.get('kr-answer') || ''
-    const krHash = params.get('kr-hash') || ''
-    const krHashAlgorithm = params.get('kr-hash-algorithm') || 'sha256'
+    const krAnswer = params.get('kr-answer')
+    const krHash = params.get('kr-hash')
 
-    // Décoder l'URL-encoding de kr-answer
-    const krAnswerDecoded = decodeURIComponent(krAnswerRaw)
+    if (!krAnswer || !krHash) {
+      return NextResponse.json({ error: 'Paramètres manquants' }, { status: 400 })
+    }
 
-    console.log('🔑 HMAC KEY utilisée :', SOGE_HMAC_KEY?.substring(0, 10) + '...')
-    console.log('📝 kr-answer décodé :', krAnswerDecoded?.substring(0, 100))
-
-    // ✅ FIX : SogEcommerce signe sur kr-answer DÉCODÉ + HMAC_KEY
-    const stringToHash = krAnswerDecoded + SOGE_HMAC_KEY
-    const expectedHash = crypto
-      .createHash(krHashAlgorithm === 'sha256' ? 'sha256' : 'sha256')
-      .update(stringToHash, 'utf8')
+    // ✅ HMAC-SHA256 (pas simple hash)
+    const calculatedHash = crypto
+      .createHmac('sha256', SOGE_HMAC_KEY)
+      .update(krAnswer)
       .digest('hex')
 
-    console.log('🔑 Hash reçu    :', krHash)
-    console.log('🔑 Hash attendu :', expectedHash)
+    console.log('🔑 Hash reçu :', krHash)
+    console.log('🔑 Hash calculé :', calculatedHash)
 
-    if (krHash !== expectedHash) {
+    if (calculatedHash !== krHash) {
       console.log('❌ Signature invalide')
       return NextResponse.json({ error: 'Signature invalide' }, { status: 401 })
     }
 
-    // Parser le JSON de kr-answer
-    const krAnswer = JSON.parse(krAnswerDecoded)
-    const orderId = krAnswer.orderDetails?.orderId
-    const status = krAnswer.orderDetails?.orderStatus
-    const detailedStatus = krAnswer.transactions?.[0]?.detailedStatus
+    // ✅ URLSearchParams décode déjà → pas de decodeURIComponent
+    const paymentData = JSON.parse(krAnswer)
+
+    const orderId = paymentData.orderDetails?.orderId
+    const status = paymentData.orderDetails?.orderStatus
+    const detailedStatus = paymentData.transactions?.[0]?.detailedStatus
 
     console.log('📦 orderId:', orderId)
     console.log('📦 status:', status)
-    console.log('📦 detailedStatus:', detailedStatus)
 
-    if (!orderId) {
-      console.error('❌ orderId manquant dans kr-answer')
-      return NextResponse.json({ error: 'orderId manquant' }, { status: 400 })
-    }
-
-    // Mettre à jour la commande si le paiement est autorisé
-    if (status === 'PAID' || detailedStatus === 'AUTHORISED') {
-      const { data, error: updateError } = await supabaseAdmin
+    if (status === 'PAID' || detailedStatus === 'AUTHORISED' || detailedStatus === 'CAPTURED') {
+      // ✅ Anti-doublons avec maybeSingle()
+      const { data: existingOrder } = await supabaseAdmin
         .from('commandes')
-        .update({ statut: 'payee' })
+        .select('id')
         .eq('reference', orderId)
-        .select()
+        .maybeSingle()
 
-      if (updateError) {
-        console.error('❌ Erreur mise à jour commande :', updateError.message)
-      } else if (!data || data.length === 0) {
-        // ✅ La commande n'existe pas encore → on l'insère depuis kr-answer
-        console.log('⚠️ Commande introuvable, tentative d insertion depuis kr-answer...')
-        const transaction = krAnswer.transactions?.[0]
+      if (existingOrder) {
+        console.log('⚠️ Commande déjà existante :', orderId)
+        return NextResponse.json({ received: true })
+      }
+
+      // ✅ Chercher dans pending_orders avec maybeSingle()
+      const { data: pending } = await supabaseAdmin
+        .from('pending_orders')
+        .select('*')
+        .eq('reference', orderId)
+        .maybeSingle()
+
+      if (pending) {
         const { error: insertError } = await supabaseAdmin
           .from('commandes')
           .insert({
             reference: orderId,
-            client_email: krAnswer.customer?.email || 'inconnu@nexoriagame.com',
-            total: (transaction?.amount || 0) / 100,
+            client_nom: pending.client_nom,
+            client_email: pending.client_email,
+            client_telephone: pending.client_telephone,
+            client_adresse: pending.client_adresse,
+            client_ville: pending.client_ville,
+            client_code_postal: pending.client_code_postal,
+            client_pays: pending.client_pays,
+            produits: pending.produits,
+            total: pending.total,
             statut: 'payee',
             mode_paiement: 'sogecommerce',
-            produits: [],
           })
+
         if (insertError) {
-          console.error('❌ Erreur insertion commande :', insertError.message)
-        } else {
-          console.log('✅ Commande insérée depuis IPN :', orderId)
+          console.error('❌ Erreur insertion commande:', insertError)
+          return NextResponse.json({ error: 'Insert failed' }, { status: 500 })
         }
+
+        await supabaseAdmin.from('pending_orders').delete().eq('reference', orderId)
+        console.log('✅ Commande créée :', orderId)
       } else {
-        console.log('✅ Commande mise à jour :', orderId)
+        console.log('⚠️ Aucune commande en attente pour :', orderId)
       }
-    } else {
-      console.log('ℹ️ Statut ignoré :', status || detailedStatus)
     }
 
     return NextResponse.json({ received: true })
-
   } catch (error: any) {
     console.error('❌ Erreur webhook :', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
