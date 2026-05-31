@@ -1,8 +1,9 @@
-// app/admin/blog/page.tsx
-'use client'
 
+// app/(admin)/blog/page.tsx
+'use client'
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase'
+import { Plus, Pencil, Trash2, Eye, EyeOff, X } from 'lucide-react'
 
 interface BlogPost {
   id: string
@@ -13,689 +14,394 @@ interface BlogPost {
   image: string | null
   categorie: string
   auteur: string
-  published_at: string
+  published_at: string | null
   created_at: string
   publie: boolean
 }
 
 const CATEGORIES = ['Gaming', 'Actualités', 'Guides', 'Événements', 'Promotions']
 
-export default function AdminBlogPage() {
+const emptyForm = {
+  slug: '',
+  titre: '',
+  extrait: '',
+  contenu: '',
+  image: '',
+  categorie: 'Gaming',
+  auteur: 'Nexoriagame',
+  publie: true
+}
+
+function generateSlug(titre: string) {
+  return titre
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+export default function BlogPage() {
   const [posts, setPosts] = useState<BlogPost[]>([])
   const [loading, setLoading] = useState(true)
-  const [editingPost, setEditingPost] = useState<BlogPost | null>(null)
-  const [showForm, setShowForm] = useState(false)
-  const [uploading, setUploading] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editing, setEditing] = useState<BlogPost | null>(null)
+  const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('Toutes')
+  const [uploading, setUploading] = useState(false)
 
-  const [formData, setFormData] = useState({
-    slug: '',
-    titre: '',
-    extrait: '',
-    contenu: '',
-    image: '',
-    categorie: 'Gaming',
-    auteur: 'Nexoriagame',
-    publie: true
-  })
-
-  const supabase = createClient()
-
-  useEffect(() => {
-    fetchPosts()
-  }, [])
-
-  async function fetchPosts() {
-    let query = supabase
-      .from('blog_posts')
-      .select('*')
-      .order('created_at', { ascending: false })
-
+  async function load() {
+    const supabase = createClient()
+    let query = supabase.from('blog_posts').select('*').order('created_at', { ascending: false })
     if (selectedCategory !== 'Toutes') {
       query = query.eq('categorie', selectedCategory)
     }
-
-    const { data, error } = await query
-
-    if (data) setPosts(data)
-    if (error) console.error('Erreur fetch:', error)
+    const { data } = await query
+    setPosts(data || [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    fetchPosts()
-  }, [selectedCategory])
+  useEffect(() => { load() }, [selectedCategory])
 
-  function generateSlug(titre: string) {
-    return titre
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '')
-  }
+  const filtered = posts.filter(p => 
+    p.titre.toLowerCase().includes(search.toLowerCase())
+  )
 
-  function handleTitreChange(value: string) {
-    setFormData({
-      ...formData,
-      titre: value,
-      slug: generateSlug(value)
+  const openCreate = () => { setEditing(null); setForm(emptyForm); setError(''); setShowModal(true) }
+  
+  const openEdit = (p: BlogPost) => {
+    setEditing(p)
+    setForm({
+      slug: p.slug,
+      titre: p.titre,
+      extrait: p.extrait || '',
+      contenu: p.contenu,
+      image: p.image || '',
+      categorie: p.categorie || 'Gaming',
+      auteur: p.auteur || 'Nexoriagame',
+      publie: p.publie
     })
+    setError('')
+    setShowModal(true)
   }
 
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target
+    const checked = (e.target as HTMLInputElement).checked
+    setForm(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+      ...(name === 'titre' && !editing ? { slug: generateSlug(value) } : {})
+    }))
+  }
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     setUploading(true)
-    
-    const fileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`
-    
+    const supabase = createClient()
+    const fileExt = file.name.split('.').pop()
+    const fileName = `blog-${Date.now()}-${Math.random().toString(36).substring(2, 6)}.${fileExt}`
+
     const { data, error } = await supabase.storage
       .from('blog-images')
-      .upload(fileName, file)
+      .upload(`public/${fileName}`, file)
 
-    if (error) {
-      console.error('Erreur upload:', error)
-      alert('Erreur lors de l\'upload de l\'image')
-      setUploading(false)
-      return
-    }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('blog-images')
-      .getPublicUrl(fileName)
-
-    setFormData({ ...formData, image: publicUrl })
-    setUploading(false)
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-
-    if (!formData.slug || !formData.titre || !formData.contenu) {
-      alert('Titre, slug et contenu sont obligatoires')
-      return
-    }
-
-    const payload = {
-      ...formData,
-      published_at: formData.publie ? new Date().toISOString() : null
-    }
-
-    if (editingPost) {
-      const { error } = await supabase
-        .from('blog_posts')
-        .update(payload)
-        .eq('id', editingPost.id)
-
-      if (error) {
-        console.error('Erreur update:', error)
-        alert('Erreur lors de la mise à jour')
-        return
-      }
+    if (data) {
+      const { data: publicUrlData } = supabase.storage
+        .from('blog-images')
+        .getPublicUrl(`public/${fileName}`)
+      setForm(prev => ({ ...prev, image: publicUrlData.publicUrl }))
     } else {
-      const { error } = await supabase
-        .from('blog_posts')
-        .insert([payload])
+      setError(error?.message || "Erreur lors de l'upload")
+    }
+    setUploading(false)
+    e.target.value = ''
+  }
 
-      if (error) {
-        console.error('Erreur insert:', error)
-        alert('Erreur lors de la création : ' + error.message)
-        return
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const supabase = createClient()
+      const data = {
+        slug: form.slug,
+        titre: form.titre,
+        extrait: form.extrait,
+        contenu: form.contenu,
+        image: form.image || null,
+        categorie: form.categorie,
+        auteur: form.auteur,
+        publie: form.publie,
+        published_at: form.publie ? new Date().toISOString() : null
       }
+      if (editing) {
+        await supabase.from('blog_posts').update(data).eq('id', editing.id)
+      } else {
+        await supabase.from('blog_posts').insert(data)
+      }
+      setShowModal(false)
+      await load()
+    } catch (e: any) {
+      setError(e.message || 'Erreur lors de la sauvegarde')
     }
-
-    resetForm()
-    fetchPosts()
+    setSaving(false)
   }
 
-  function editPost(post: BlogPost) {
-    setEditingPost(post)
-    setFormData({
-      slug: post.slug,
-      titre: post.titre,
-      extrait: post.extrait || '',
-      contenu: post.contenu,
-      image: post.image || '',
-      categorie: post.categorie || 'Gaming',
-      auteur: post.auteur || 'Nexoriagame',
-      publie: post.publie
-    })
-    setShowForm(true)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  async function deletePost(id: string) {
+  const handleDelete = async (id: string) => {
     if (!confirm('Supprimer définitivement cet article ?')) return
-
-    const { error } = await supabase
-      .from('blog_posts')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      alert('Erreur lors de la suppression')
-      return
-    }
-
-    fetchPosts()
+    const supabase = createClient()
+    await supabase.from('blog_posts').delete().eq('id', id)
+    await load()
   }
 
-  async function togglePublie(post: BlogPost) {
-    const { error } = await supabase
-      .from('blog_posts')
-      .update({ 
-        publie: !post.publie,
-        published_at: !post.publie ? new Date().toISOString() : post.published_at
-      })
-      .eq('id', post.id)
-
-    if (!error) fetchPosts()
-  }
-
-  function resetForm() {
-    setFormData({
-      slug: '',
-      titre: '',
-      extrait: '',
-      contenu: '',
-      image: '',
-      categorie: 'Gaming',
-      auteur: 'Nexoriagame',
-      publie: true
-    })
-    setEditingPost(null)
-    setShowForm(false)
-  }
-
-  if (loading) {
-    return (
-      <div style={{ 
-        minHeight: '60vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        color: '#6b7280',
-        fontSize: 16
-      }}>
-        Chargement des articles...
-      </div>
-    )
+  const togglePublie = async (p: BlogPost) => {
+    const supabase = createClient()
+    await supabase.from('blog_posts').update({ 
+      publie: !p.publie,
+      published_at: !p.publie ? new Date().toISOString() : p.published_at
+    }).eq('id', p.id)
+    await load()
   }
 
   return (
-    <div style={{
-      maxWidth: 1200,
-      margin: '0 auto',
-      padding: '40px 5%',
-      color: '#1a1a2e',
-      fontFamily: 'system-ui, sans-serif'
-    }}>
+    <div>
       {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        marginBottom: 32,
-        flexWrap: 'wrap',
-        gap: 16
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, color: '#1a1a2e', marginBottom: 4 }}>
-            📝 Gestion du Blog
-          </h1>
-          <p style={{ color: '#6b7280', fontSize: 14 }}>
-            {posts.length} article{posts.length > 1 ? 's' : ''}
-          </p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Blog</h1>
+          <p style={{ color: '#aaa', fontSize: 14 }}>{posts.length} article{posts.length > 1 ? 's' : ''} au total</p>
         </div>
-        <button
-          onClick={() => {
-            resetForm()
-            setShowForm(!showForm)
-          }}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: showForm ? '#ef4444' : '#7c3aed',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 10,
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontSize: 14,
-            transition: 'all 0.2s'
-          }}
-        >
-          {showForm ? '✕ Fermer le formulaire' : '+ Nouvel article'}
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input 
+            value={search} 
+            onChange={e => setSearch(e.target.value)} 
+            placeholder="Rechercher..." 
+            style={{ padding: '10px 14px', fontSize: 14, width: 200, background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff' }} 
+          />
+          <button 
+            onClick={openCreate} 
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', padding: '11px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 700, boxShadow: '0 4px 15px rgba(124,58,237,0.4)', whiteSpace: 'nowrap' }}
+          >
+            <Plus size={16} /> Nouvel article
+          </button>
+        </div>
       </div>
 
       {/* Filtres catégories */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
         <button
           onClick={() => setSelectedCategory('Toutes')}
-          style={filterStyle(selectedCategory === 'Toutes')}
+          style={{
+            padding: '7px 14px',
+            borderRadius: 20,
+            border: selectedCategory === 'Toutes' ? '2px solid #7c3aed' : '1px solid #333',
+            background: selectedCategory === 'Toutes' ? 'rgba(124,58,237,0.15)' : '#111',
+            color: selectedCategory === 'Toutes' ? '#a855f7' : '#aaa',
+            fontWeight: selectedCategory === 'Toutes' ? 700 : 400,
+            fontSize: 12,
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
         >
           Toutes
         </button>
-        {CATEGORIES.map((cat) => (
+        {CATEGORIES.map(cat => (
           <button
             key={cat}
             onClick={() => setSelectedCategory(cat)}
-            style={filterStyle(selectedCategory === cat)}
+            style={{
+              padding: '7px 14px',
+              borderRadius: 20,
+              border: selectedCategory === cat ? '2px solid #7c3aed' : '1px solid #333',
+              background: selectedCategory === cat ? 'rgba(124,58,237,0.15)' : '#111',
+              color: selectedCategory === cat ? '#a855f7' : '#aaa',
+              fontWeight: selectedCategory === cat ? 700 : 400,
+              fontSize: 12,
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
           >
             {cat}
           </button>
         ))}
       </div>
 
-      {/* Formulaire */}
-      {showForm && (
-        <form onSubmit={handleSubmit} style={{
-          backgroundColor: '#fff',
-          padding: 28,
-          borderRadius: 12,
-          marginBottom: 32,
-          border: '1px solid #e5e7eb',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
-        }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 24, color: '#1a1a2e' }}>
-            {editingPost ? '✏️ Modifier l\'article' : '✨ Nouvel article'}
-          </h2>
+      {/* Tableau */}
+      <div style={{ background: '#111', border: '1px solid #222', borderRadius: 16, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #222' }}>
+                {['Article', 'Catégorie', 'Auteur', 'Date', 'Statut', 'Actions'].map(h => (
+                  <th key={h} style={{ padding: '14px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#aaa' }}>Chargement...</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#aaa', fontSize: 14 }}>Aucun article. Cliquez sur "Nouvel article" pour commencer.</td></tr>
+              ) : filtered.map(p => (
+                <tr key={p.id} style={{ borderBottom: '1px solid rgba(124,58,237,0.1)', opacity: p.publie ? 1 : 0.5 }}>
+                  <td style={{ padding: '14px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', background: '#1a1a1a', flexShrink: 0 }}>
+                        {p.image ? (
+                          <img src={p.image} alt={p.titre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📝</div>
+                        )}
+                      </div>
+                      <div>
+                        <p style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.titre}</p>
+                        <p style={{ fontSize: 11, color: '#666' }}>/blog/{p.slug}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '14px 20px', fontSize: 13, color: '#06b6d4' }}>{p.categorie}</td>
+                  <td style={{ padding: '14px 20px', fontSize: 13, color: '#aaa' }}>{p.auteur}</td>
+                  <td style={{ padding: '14px 20px', fontSize: 12, color: '#666' }}>
+                    {new Date(p.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </td>
+                  <td style={{ padding: '14px 20px' }}>
+                    <span style={{ 
+                      background: p.publie ? 'rgba(74,222,128,0.15)' : 'rgba(100,116,139,0.15)', 
+                      color: p.publie ? '#4ade80' : '#aaa', 
+                      border: `1px solid ${p.publie ? 'rgba(74,222,128,0.3)' : 'rgba(100,116,139,0.3)'}`, 
+                      padding: '4px 10px', 
+                      borderRadius: 6, 
+                      fontSize: 12, 
+                      fontWeight: 700 
+                    }}>
+                      {p.publie ? 'Publié' : 'Brouillon'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '14px 20px' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => togglePublie(p)} title={p.publie ? 'Dépublier' : 'Publier'} style={{ background: 'rgba(124,58,237,0.15)', border: '1px solid #222', color: '#aaa', width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {p.publie ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                      <button onClick={() => openEdit(p)} style={{ background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', color: '#06b6d4', width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => handleDelete(p.id)} style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-          <div style={{ display: 'grid', gap: 20 }}>
-            {/* Titre */}
-            <div>
-              <label style={labelStyle}>Titre *</label>
-              <input
-                type="text"
-                value={formData.titre}
-                onChange={(e) => handleTitreChange(e.target.value)}
-                required
-                style={inputStyle}
-                placeholder="Titre de l'article"
-              />
+      {/* MODAL */}
+      {showModal && (
+        <>
+          <div onClick={() => setShowModal(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 200 }} />
+          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: '90%', maxWidth: 700, maxHeight: '90vh', overflowY: 'auto', background: '#1a1a2e', border: '1px solid #333', borderRadius: 20, padding: 32, zIndex: 201 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>{editing ? 'Modifier l\'article' : 'Nouvel article'}</h2>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer' }}><X size={20} /></button>
             </div>
-
-            {/* Slug */}
-            <div>
-              <label style={labelStyle}>Slug (URL) *</label>
-              <input
-                type="text"
-                value={formData.slug}
-                onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                required
-                style={inputStyle}
-                placeholder="mon-article"
-              />
-              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
-                URL : /blog/{formData.slug || '...'}
-              </p>
-            </div>
-
-            {/* Catégorie + Auteur */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div>
-                <label style={labelStyle}>Catégorie</label>
-                <select
-                  value={formData.categorie}
-                  onChange={(e) => setFormData({ ...formData, categorie: e.target.value })}
-                  style={inputStyle}
-                >
-                  {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+            <form onSubmit={handleSave}>
+              {/* Titre */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Titre *</label>
+                <input name="titre" value={form.titre} onChange={handleChange} placeholder="Titre de l'article" required style={{ width: '100%', padding: '11px 14px', fontSize: 14, background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
               </div>
-              <div>
-                <label style={labelStyle}>Auteur</label>
-                <input
-                  type="text"
-                  value={formData.auteur}
-                  onChange={(e) => setFormData({ ...formData, auteur: e.target.value })}
-                  style={inputStyle}
-                  placeholder="Nexoriagame"
-                />
+
+              {/* Slug + Catégorie + Auteur */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 14 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Slug *</label>
+                  <input name="slug" value={form.slug} onChange={handleChange} placeholder="mon-article" required style={{ width: '100%', padding: '11px 14px', fontSize: 14, background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Catégorie</label>
+                  <select name="categorie" value={form.categorie} onChange={handleChange} style={{ width: '100%', padding: '11px 14px', fontSize: 14, background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }}>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Auteur</label>
+                  <input name="auteur" value={form.auteur} onChange={handleChange} placeholder="Nexoriagame" style={{ width: '100%', padding: '11px 14px', fontSize: 14, background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
+                </div>
               </div>
-            </div>
 
-            {/* Extrait */}
-            <div>
-              <label style={labelStyle}>Extrait</label>
-              <textarea
-                value={formData.extrait}
-                onChange={(e) => setFormData({ ...formData, extrait: e.target.value })}
-                rows={3}
-                style={{ ...inputStyle, resize: 'vertical' }}
-                placeholder="Résumé court de l'article..."
-              />
-            </div>
+              {/* Extrait */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Extrait</label>
+                <textarea name="extrait" value={form.extrait} onChange={handleChange} placeholder="Résumé court de l'article..." rows={2} style={{ width: '100%', padding: '11px 14px', fontSize: 14, resize: 'vertical', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
+              </div>
 
-            {/* Contenu */}
-            <div>
-              <label style={labelStyle}>Contenu (Markdown) *</label>
-              <textarea
-                value={formData.contenu}
-                onChange={(e) => setFormData({ ...formData, contenu: e.target.value })}
-                required
-                rows={12}
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace', fontSize: 13 }}
-                placeholder={`## Titre\n\nVotre contenu ici...\n\n- Liste\n- Items\n\n**Gras** *Italique*`}
-              />
-            </div>
+              {/* Contenu */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Contenu (Markdown) *</label>
+                <textarea name="contenu" value={form.contenu} onChange={handleChange} placeholder="## Titre&#10;&#10;Votre contenu..." required rows={8} style={{ width: '100%', padding: '11px 14px', fontSize: 13, fontFamily: 'monospace', resize: 'vertical', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
+              </div>
 
-            {/* Image */}
-            <div>
-              <label style={labelStyle}>Image principale</label>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  type="text"
-                  value={formData.image}
-                  onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                  style={{ ...inputStyle, flex: 1, minWidth: 250 }}
-                  placeholder="https://... ou uploadez"
+              {/* Image */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>Image principale (URL)</label>
+                <textarea 
+                  name="image" 
+                  value={form.image} 
+                  onChange={handleChange} 
+                  placeholder="https://exemple.com/image.jpg" 
+                  rows={2} 
+                  style={{ width: '100%', padding: '11px 14px', fontSize: 13, resize: 'vertical', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} 
                 />
-                <span style={{ color: '#6b7280', fontSize: 14 }}>ou</span>
-                <label style={{
-                  padding: '10px 16px',
-                  backgroundColor: '#f3f4f6',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  fontSize: 14,
-                  fontWeight: 500,
-                  border: '1px solid #d1d5db',
-                  whiteSpace: 'nowrap',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6
-                }}>
-                  📁 Parcourir
+                <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleImageUpload}
-                    style={{ display: 'none' }}
                     disabled={uploading}
+                    style={{ fontSize: 13, color: '#aaa' }}
                   />
-                </label>
-              </div>
-              {uploading && (
-                <p style={{ color: '#7c3aed', fontSize: 14, marginTop: 8 }}>
-                  ⏳ Upload en cours...
-                </p>
-              )}
-              {formData.image && (
-                <div style={{ marginTop: 12, position: 'relative', display: 'inline-block' }}>
-                  <img
-                    src={formData.image}
-                    alt="Preview"
-                    style={{ 
-                      maxWidth: 250, 
-                      borderRadius: 8, 
-                      border: '1px solid #e5e7eb',
-                      display: 'block'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, image: '' })}
-                    style={{
-                      position: 'absolute',
-                      top: -8,
-                      right: -8,
-                      width: 24,
-                      height: 24,
-                      borderRadius: '50%',
-                      border: 'none',
-                      backgroundColor: '#ef4444',
-                      color: '#fff',
-                      cursor: 'pointer',
-                      fontSize: 14,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    ✕
-                  </button>
+                  {uploading && <span style={{ fontSize: 12, color: '#06b6d4' }}>Upload en cours…</span>}
                 </div>
-              )}
-            </div>
-
-            {/* Publié */}
-            <div>
-              <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={formData.publie}
-                  onChange={(e) => setFormData({ ...formData, publie: e.target.checked })}
-                  style={{ width: 18, height: 18, cursor: 'pointer' }}
-                />
-                <span>Publier l&apos;article</span>
-                {formData.publie && (
-                  <span style={{ fontSize: 12, color: '#6b7280' }}>
-                    (visible immédiatement)
-                  </span>
+                {form.image && (
+                  <div style={{ marginTop: 12, position: 'relative', display: 'inline-block' }}>
+                    <img src={form.image} alt="Preview" style={{ maxWidth: 200, borderRadius: 8, border: '1px solid #333' }} />
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, image: '' }))}
+                      style={{ position: 'absolute', top: -8, right: -8, width: 22, height: 22, borderRadius: '50%', border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 )}
-              </label>
-            </div>
-
-            {/* Boutons */}
-            <div style={{ display: 'flex', gap: 12, paddingTop: 8 }}>
-              <button type="submit" style={{
-                padding: '12px 28px',
-                backgroundColor: '#7c3aed',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 8,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontSize: 15,
-                transition: 'all 0.2s'
-              }}>
-                {editingPost ? '💾 Mettre à jour' : '📝 Créer l\'article'}
-              </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: '#f3f4f6',
-                  border: '1px solid #d1d5db',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  fontSize: 15,
-                  color: '#374151'
-                }}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        </form>
-      )}
-
-      {/* Liste des articles */}
-      <div style={{ display: 'grid', gap: 10 }}>
-        {posts.map((post) => (
-          <div key={post.id} style={{
-            backgroundColor: '#fff',
-            padding: '16px 20px',
-            borderRadius: 10,
-            border: '1px solid #e5e7eb',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 16,
-            flexWrap: 'wrap',
-            transition: 'box-shadow 0.2s'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 200 }}>
-              {post.image ? (
-                <img
-                  src={post.image}
-                  alt={post.titre}
-                  style={{ 
-                    width: 56, 
-                    height: 56, 
-                    borderRadius: 8, 
-                    objectFit: 'cover',
-                    border: '1px solid #f3f4f6',
-                    flexShrink: 0
-                  }}
-                />
-              ) : (
-                <div style={{ 
-                  width: 56, 
-                  height: 56, 
-                  borderRadius: 8, 
-                  backgroundColor: '#f3f4f6',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 20,
-                  flexShrink: 0
-                }}>
-                  📄
-                </div>
-              )}
-              <div style={{ minWidth: 0 }}>
-                <p style={{ 
-                  fontWeight: 600, 
-                  color: '#1a1a2e', 
-                  marginBottom: 3,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
-                  {post.titre}
-                </p>
-                <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>
-                  /blog/{post.slug} • {post.categorie || 'Gaming'}
-                </p>
-                <p style={{ fontSize: 11, color: '#9ca3af' }}>
-                  Créé le {new Date(post.created_at).toLocaleDateString('fr-FR', { 
-                    day: 'numeric', 
-                    month: 'short', 
-                    year: 'numeric' 
-                  })}
-                  {post.publie && post.published_at && (
-                    <> • Publié le {new Date(post.published_at).toLocaleDateString('fr-FR', { 
-                      day: 'numeric', 
-                      month: 'short', 
-                      year: 'numeric' 
-                    })}</>
-                  )}
-                </p>
               </div>
-            </div>
 
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-              <button
-                onClick={() => togglePublie(post)}
-                title={post.publie ? 'Dépublier' : 'Publier'}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: 6,
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  backgroundColor: post.publie ? '#d1fae5' : '#fef3c7',
-                  color: post.publie ? '#065f46' : '#92400e',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {post.publie ? '✅ Publié' : '📝 Brouillon'}
-              </button>
-              <button
-                onClick={() => editPost(post)}
-                title="Modifier"
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: 6,
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  backgroundColor: '#dbeafe',
-                  color: '#1e40af',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                ✏️ Modifier
-              </button>
-              <button
-                onClick={() => deletePost(post.id)}
-                title="Supprimer"
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: 6,
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  backgroundColor: '#fee2e2',
-                  color: '#991b1b'
-                }}
-              >
-                🗑️
-              </button>
-            </div>
+              {/* Publié */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20, fontSize: 14, color: '#aaa' }}>
+                <input type="checkbox" name="publie" checked={form.publie} onChange={handleChange} style={{ width: 16, height: 16, accentColor: '#7c3aed' }} />
+                Article publié (visible sur le site)
+              </label>
+
+              {error && <div style={{ color: '#ef4444', fontSize: 14, marginBottom: 16, background: 'rgba(239,68,68,0.1)', padding: '10px 14px', borderRadius: 8 }}>{error}</div>}
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button type="submit" disabled={saving} style={{ flex: 1, background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', padding: 14, borderRadius: 10, fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', border: 'none', cursor: saving ? 'not-allowed' : 'pointer' }}>
+                  {saving ? 'Sauvegarde...' : editing ? 'Enregistrer' : 'Créer l\'article'}
+                </button>
+                <button type="button" onClick={() => setShowModal(false)} style={{ padding: '14px 20px', borderRadius: 10, background: 'none', border: '1px solid #333', color: '#aaa', cursor: 'pointer', fontSize: 14 }}>Annuler</button>
+              </div>
+            </form>
           </div>
-        ))}
-      </div>
-
-      {posts.length === 0 && (
-        <div style={{ 
-          textAlign: 'center', 
-          padding: 60, 
-          backgroundColor: '#f9fafb',
-          borderRadius: 12,
-          color: '#6b7280'
-        }}>
-          <p style={{ fontSize: 40, marginBottom: 12 }}>📝</p>
-          <p style={{ fontSize: 16, fontWeight: 500 }}>Aucun article trouvé</p>
-          <p style={{ fontSize: 14, marginTop: 4 }}>
-            {selectedCategory !== 'Toutes' 
-              ? `Aucun article dans la catégorie "${selectedCategory}"` 
-              : 'Créez votre premier article !'}
-          </p>
-        </div>
+        </>
       )}
     </div>
   )
-}
-
-// Styles réutilisables
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  marginBottom: 6,
-  fontWeight: 600,
-  fontSize: 14,
-  color: '#374151'
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 14px',
-  borderRadius: 8,
-  border: '1px solid #d1d5db',
-  fontSize: 14,
-  fontFamily: 'system-ui, sans-serif',
-  outline: 'none',
-  boxSizing: 'border-box',
-  transition: 'border-color 0.2s'
-}
-
-function filterStyle(active: boolean): React.CSSProperties {
-  return {
-    padding: '8px 16px',
-    borderRadius: 20,
-    border: active ? '2px solid #7c3aed' : '1px solid #d1d5db',
-    backgroundColor: active ? '#ede9fe' : '#fff',
-    color: active ? '#5b21b6' : '#6b7280',
-    fontWeight: active ? 600 : 400,
-    fontSize: 13,
-    cursor: 'pointer',
-    transition: 'all 0.2s'
-  }
 }
