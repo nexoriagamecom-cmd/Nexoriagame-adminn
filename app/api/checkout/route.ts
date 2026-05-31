@@ -63,6 +63,8 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: NextRequest) {
+  console.log('SERVICE KEY présente:', !!process.env.SUPABASE_SERVICE_ROLE_KEY)
+  console.log('SERVICE KEY début:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 20))
   try {
     const { amount, orderId, customerEmail, country, clientInfo, produits } = await request.json()
 
