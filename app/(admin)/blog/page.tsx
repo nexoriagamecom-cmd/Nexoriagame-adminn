@@ -2,7 +2,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
-import { Plus, Pencil, Trash2, Eye, EyeOff, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, EyeOff, X } from 'lucide-react'
 
 interface BlogPost {
   id: string
@@ -55,12 +55,14 @@ export default function BlogPage() {
   const supabase = createClient()
 
   async function load() {
+    console.log('🔄 Chargement des articles...')
     let query = supabase.from('blog_posts').select('*').order('created_at', { ascending: false })
     if (selectedCategory !== 'Toutes') {
       query = query.eq('categorie', selectedCategory)
     }
     const { data, error } = await query
-    if (error) console.error('Erreur chargement:', error)
+    if (error) console.error('❌ Erreur chargement:', error)
+    console.log('✅ Articles chargés:', data?.length)
     setPosts(data || [])
     setLoading(false)
   }
@@ -72,6 +74,7 @@ export default function BlogPage() {
   )
 
   const openCreate = () => {
+    console.log('➕ Ouverture formulaire CRÉATION')
     setEditing(null)
     setForm(emptyForm)
     setError('')
@@ -79,6 +82,7 @@ export default function BlogPage() {
   }
 
   const openEdit = (p: BlogPost) => {
+    console.log('✏️ Ouverture formulaire ÉDITION pour:', p.id, p.titre)
     setEditing(p)
     setForm({
       slug: p.slug,
@@ -109,6 +113,7 @@ export default function BlogPage() {
     if (!file) return
 
     setUploading(true)
+    console.log('📤 Upload image:', file.name)
     const fileExt = file.name.split('.').pop()
     const fileName = `blog-${Date.now()}-${Math.random().toString(36).substring(2, 6)}.${fileExt}`
 
@@ -120,8 +125,10 @@ export default function BlogPage() {
       const { data: publicUrlData } = supabase.storage
         .from('blog-images')
         .getPublicUrl(`public/${fileName}`)
+      console.log('✅ Image uploadée:', publicUrlData.publicUrl)
       setForm(prev => ({ ...prev, image: publicUrlData.publicUrl }))
     } else {
+      console.error('❌ Erreur upload:', error)
       setError(error?.message || "Erreur lors de l'upload")
     }
     setUploading(false)
@@ -151,51 +158,68 @@ export default function BlogPage() {
       published_at: form.publie ? new Date().toISOString() : null
     }
 
+    console.log('========================================')
+    console.log('💾 handleSave appelé')
+    console.log('📝 editing:', editing ? editing.id : 'null (création)')
+    console.log('📦 payload:', JSON.stringify(payload, null, 2))
+    console.log('========================================')
+
     if (editing) {
-      // MISE À JOUR
-      const { error } = await supabase
+      console.log('🔄 UPDATE sur blog_posts, id:', editing.id)
+      const { data, error } = await supabase
         .from('blog_posts')
         .update(payload)
         .eq('id', editing.id)
+        .select()
+
+      console.log('✅ UPDATE résultat:', { data, error })
 
       if (error) {
-        console.error('Erreur update:', error)
+        console.error('❌ Erreur UPDATE:', error)
         setError('Erreur lors de la mise à jour : ' + error.message)
         setSaving(false)
         return
       }
     } else {
-      // CRÉATION
-      const { error } = await supabase
+      console.log('➕ INSERT dans blog_posts')
+      const { data, error } = await supabase
         .from('blog_posts')
         .insert(payload)
+        .select()
+
+      console.log('✅ INSERT résultat:', { data, error })
 
       if (error) {
-        console.error('Erreur insert:', error)
+        console.error('❌ Erreur INSERT:', error)
         setError('Erreur lors de la création : ' + error.message)
         setSaving(false)
         return
       }
     }
 
+    console.log('🎉 Sauvegarde réussie, fermeture modal et rechargement...')
     setShowModal(false)
     setEditing(null)
     setForm(emptyForm)
-    await load()
     setSaving(false)
+    await load()
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Supprimer définitivement cet article ?')) return
+    console.log('🗑️ Suppression article:', id)
     const { error } = await supabase.from('blog_posts').delete().eq('id', id)
     if (error) {
+      console.error('❌ Erreur suppression:', error)
       alert('Erreur lors de la suppression')
       return
     }
+    console.log('✅ Article supprimé')
     await load()
   }
 
   const togglePublie = async (p: BlogPost) => {
+    console.log('👁️ Toggle publie pour:', p.id, !p.publie)
     const { error } = await supabase
       .from('blog_posts')
       .update({
@@ -215,16 +239,8 @@ export default function BlogPage() {
           <p style={{ color: '#aaa', fontSize: 14 }}>{posts.length} article{posts.length > 1 ? 's' : ''}</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Rechercher..."
-            style={{ padding: '10px 14px', fontSize: 14, width: 200, background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff' }}
-          />
-          <button
-            onClick={openCreate}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', padding: '11px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 700, boxShadow: '0 4px 15px rgba(124,58,237,0.4)', whiteSpace: 'nowrap' }}
-          >
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." style={{ padding: '10px 14px', fontSize: 14, width: 200, background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
+          <button onClick={openCreate} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', padding: '11px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 700, boxShadow: '0 4px 15px rgba(124,58,237,0.4)', whiteSpace: 'nowrap' }}>
             <Plus size={16} /> Nouvel article
           </button>
         </div>
@@ -259,7 +275,7 @@ export default function BlogPage() {
                   <td style={{ padding: '14px 20px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', background: '#1a1a1a', flexShrink: 0 }}>
-                        {p.image ? <img src={p.image} alt={p.titre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>?</div>}
+                        {p.image ? <img src={p.image} alt={p.titre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: '#555' }}>📄</div>}
                       </div>
                       <div>
                         <p style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.titre}</p>
@@ -275,7 +291,7 @@ export default function BlogPage() {
                   </td>
                   <td style={{ padding: '14px 20px' }}>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => togglePublie(p)} title={p.publie ? 'Dépublier' : 'Publier'} style={iconBtnStyle}><EyeOff size={14} /></button>
+                      <button onClick={() => togglePublie(p)} style={iconBtnStyle}><EyeOff size={14} /></button>
                       <button onClick={() => openEdit(p)} style={{ ...iconBtnStyle, background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', color: '#06b6d4' }}><Pencil size={14} /></button>
                       <button onClick={() => handleDelete(p.id)} style={{ ...iconBtnStyle, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}><Trash2 size={14} /></button>
                     </div>
@@ -346,7 +362,7 @@ export default function BlogPage() {
               {error && <div style={{ color: '#ef4444', fontSize: 14, marginBottom: 16, background: 'rgba(239,68,68,0.1)', padding: '10px 14px', borderRadius: 8 }}>{error}</div>}
               <div style={{ display: 'flex', gap: 12 }}>
                 <button type="submit" disabled={saving} style={{ flex: 1, background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', padding: 14, borderRadius: 10, fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', border: 'none', cursor: saving ? 'not-allowed' : 'pointer' }}>
-                  {saving ? 'Sauvegarde...' : editing ? 'Enregistrer les modifications' : 'Créer l\'article'}
+                  {saving ? 'Sauvegarde...' : editing ? 'Enregistrer les modifications' : "Créer l'article"}
                 </button>
                 <button type="button" onClick={() => setShowModal(false)} style={{ padding: '14px 20px', borderRadius: 10, background: 'none', border: '1px solid #333', color: '#aaa', cursor: 'pointer', fontSize: 14 }}>Annuler</button>
               </div>
