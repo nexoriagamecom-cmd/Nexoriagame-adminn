@@ -12,7 +12,7 @@ const CATEGORIES: { value: Category; label: string }[] = [
 ]
 
 const emptyForm = {
-  nom: '', slug: '', description: '', prix: '', prix_barre: '',
+  nom: '', slug: '', sku: '', description: '', prix: '', prix_barre: '',
   images: '', categorie: 'consoles' as Category, stock: '0',
   badge: '', actif: true,
   promo_countdown: false, promo_stock_limite: false, promo_viewers: false,
@@ -25,6 +25,13 @@ function generateSlug(nom: string) {
   return nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+function generateSku(nom: string, categorie: string) {
+  const prefix = 'NXG-' + categorie.substring(0, 4).toUpperCase()
+  const namePart = nom.substring(0, 3).toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase()
+  return `${prefix}-${namePart}-${random}`
+}
+
 export default function ProduitsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,7 +41,7 @@ export default function ProduitsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [uploading, setUploading] = useState(false) // ← Nouvel état
+  const [uploading, setUploading] = useState(false)
 
   async function load() {
     const supabase = createClient()
@@ -51,7 +58,7 @@ export default function ProduitsPage() {
   const openEdit = (p: Product) => {
     setEditing(p)
     setForm({
-      nom: p.nom, slug: p.slug, description: p.description || '',
+      nom: p.nom, slug: p.slug, sku: (p as any).sku || '', description: p.description || '',
       prix: String(p.prix), prix_barre: p.prix_barre ? String(p.prix_barre) : '',
       images: (p.images || []).join('\n'), categorie: p.categorie,
       stock: String(p.stock), badge: p.badge || '', actif: p.actif,
@@ -68,10 +75,13 @@ export default function ProduitsPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
     const checked = (e.target as HTMLInputElement).checked
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
+    setForm(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+      ...(name === 'nom' && !editing ? { slug: generateSlug(value), sku: generateSku(value, prev.categorie) } : {})
+    }))
   }
 
-  // ✅ Fonction d'upload d'image
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -97,7 +107,6 @@ export default function ProduitsPage() {
       setError(error?.message || "Erreur lors de l'upload")
     }
     setUploading(false)
-    // Réinitialiser l'input file
     e.target.value = ''
   }
 
@@ -112,6 +121,7 @@ export default function ProduitsPage() {
       }
       const data = {
         nom: form.nom, slug: form.slug || generateSlug(form.nom),
+        sku: form.sku || generateSku(form.nom, form.categorie),
         description: form.description, prix: parseFloat(form.prix),
         prix_barre: form.prix_barre ? parseFloat(form.prix_barre) : null,
         images: form.images.split('\n').map((s: string) => s.trim()).filter(Boolean),
@@ -163,16 +173,16 @@ export default function ProduitsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #222' }}>
-                {['Produit', 'Catégorie', 'Prix', 'Stock', 'Statut', 'Actions'].map(h => (
+                {['Produit', 'SKU', 'Catégorie', 'Prix', 'Stock', 'Statut', 'Actions'].map(h => (
                   <th key={h} style={{ padding: '14px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#aaa' }}>Chargement...</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#aaa' }}>Chargement...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: '#aaa', fontSize: 14 }}>Aucun produit. Cliquez sur "Ajouter" pour commencer.</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: '#aaa', fontSize: 14 }}>Aucun produit. Cliquez sur "Ajouter" pour commencer.</td></tr>
               ) : filtered.map(p => (
                 <tr key={p.id} style={{ borderBottom: '1px solid rgba(124,58,237,0.1)', opacity: p.actif ? 1 : 0.5 }}>
                   <td style={{ padding: '14px 20px' }}>
@@ -185,6 +195,9 @@ export default function ProduitsPage() {
                         {p.badge && <span style={{ fontSize: 11, color: '#a855f7', background: 'rgba(124,58,237,0.15)', padding: '2px 6px', borderRadius: 4 }}>{p.badge}</span>}
                       </div>
                     </div>
+                  </td>
+                  <td style={{ padding: '14px 20px', fontSize: 12, color: '#a78bfa', fontFamily: 'monospace' }}>
+                    {(p as any).sku || '—'}
                   </td>
                   <td style={{ padding: '14px 20px', fontSize: 13, color: '#06b6d4', textTransform: 'capitalize' }}>{p.categorie.replace('-', ' ')}</td>
                   <td style={{ padding: '14px 20px' }}>
@@ -232,6 +245,7 @@ export default function ProduitsPage() {
               {[
                 { name: 'nom', label: 'Nom *', placeholder: 'Ex : PS5 Standard', required: true },
                 { name: 'slug', label: 'Slug URL (auto si vide)', placeholder: 'ps5-standard' },
+                { name: 'sku', label: 'SKU (auto-généré si vide)', placeholder: 'NXG-CONS-001' },
                 { name: 'badge', label: 'Badge', placeholder: 'Nouveau, Promo...' },
               ].map(f => (
                 <div key={f.name} style={{ marginBottom: 14 }}>
@@ -266,17 +280,9 @@ export default function ProduitsPage() {
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', marginBottom: 6 }}>URLs images (une par ligne)</label>
                 <textarea name="images" value={form.images} onChange={handleChange} placeholder="https://example.com/image.jpg" rows={3} style={{ width: '100%', padding: '11px 14px', fontSize: 13, resize: 'vertical', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
-                
-                {/* ✅ Upload depuis le PC */}
                 <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    disabled={uploading}
-                    style={{ fontSize: 13, color: 'var(--gray)' }}
-                  />
-                  {uploading && <span style={{ fontSize: 12, color: '#06b6d4' }}>Upload en cours…</span>}
+                  <input type="file" accept="image/*" onChange={handleImageUpload} disabled={uploading} style={{ fontSize: 13, color: 'var(--gray)' }} />
+                  {uploading && <span style={{ fontSize: 12, color: '#06b6d4' }}>Upload en cours...</span>}
                 </div>
               </div>
               <div style={{ marginBottom: 14 }}>
@@ -284,11 +290,11 @@ export default function ProduitsPage() {
                 <textarea name="variations" value={form.variations} onChange={handleChange} placeholder={'[\n  {"nom": "Couleur", "options": ["Noir", "Blanc"]}\n]'} rows={3} style={{ width: '100%', padding: '11px 14px', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff' }} />
               </div>
               <div style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)', borderRadius: 12, padding: 16, marginBottom: 14 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#a855f7', marginBottom: 12 }}>⚡ Outils de promotion</p>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#a855f7', marginBottom: 12 }}>Outils de promotion</p>
                 {[
-                  { name: 'promo_stock_limite', label: '⚠️ Badge "Stock limité" clignotant' },
-                  { name: 'promo_viewers', label: '👥 "X personnes regardent ce produit"' },
-                  { name: 'promo_countdown', label: '⏳ Compte à rebours offre limitée' },
+                  { name: 'promo_stock_limite', label: 'Badge "Stock limité" clignotant' },
+                  { name: 'promo_viewers', label: '"X personnes regardent ce produit"' },
+                  { name: 'promo_countdown', label: 'Compte à rebours offre limitée' },
                 ].map(opt => (
                   <label key={opt.name} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 10, fontSize: 14, color: '#aaa' }}>
                     <input type="checkbox" name={opt.name} checked={(form as any)[opt.name]} onChange={handleChange} style={{ width: 16, height: 16, accentColor: '#7c3aed' }} />
@@ -297,16 +303,15 @@ export default function ProduitsPage() {
                 ))}
               </div>
 
-              {/* ⭐ Affichage page d'accueil */}
               <div style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.25)', borderRadius: 12, padding: 16, marginBottom: 14 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#06b6d4', marginBottom: 12 }}>⭐ Affichage page d'accueil</p>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#06b6d4', marginBottom: 12 }}>Affichage page d'accueil</p>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 10, fontSize: 14, color: '#aaa' }}>
                   <input type="checkbox" name="best_seller" checked={(form as any).best_seller} onChange={handleChange} style={{ width: 16, height: 16, accentColor: '#06b6d4' }} />
-                  Afficher dans les <strong>Best‑Sellers</strong> (page d'accueil)
+                  Afficher dans les <strong>Best-Sellers</strong>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: '#aaa' }}>
                   <input type="checkbox" name="nouveaute" checked={(form as any).nouveaute} onChange={handleChange} style={{ width: 16, height: 16, accentColor: '#06b6d4' }} />
-                  Afficher dans les <strong>Nouveautés</strong> (page d'accueil)
+                  Afficher dans les <strong>Nouveautés</strong>
                 </label>
               </div>
 
